@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.database import Database
 from app.schemas import AIDiscoveryRequest
-from app.security import sanitize_text, validate_iso_date
+from app.security import sanitize_text
+from app.services.genai_service import GenAIService
 from app.services.scheduler import get_equipment_schedule
+from app.utils import get_db, get_genai, parse_optional_iso_date
 
 router = APIRouter(tags=["Equipment & Discovery"])
 
@@ -22,10 +26,41 @@ def _enrich_equipment_row(row: dict[str, Any]) -> dict[str, Any]:
     return item
 
 
+def _load_daily_availability_map(
+    conn: sqlite3.Connection,
+    equipment_items: list[dict[str, Any]],
+    day_iso: str,
+) -> dict[int, dict[str, Any]]:
+    """Compute daily utilization and open hours for all resources in a single query."""
+    booking_rows = conn.execute(
+        """
+        SELECT equipment_id, start_hour, end_hour
+        FROM bookings
+        WHERE booking_date = ?
+          AND status IN ('confirmed', 'conflict')
+        """,
+        (day_iso,),
+    ).fetchall()
+
+    booked_hours_by_eq: dict[int, set[int]] = {}
+    for b in booking_rows:
+        hours_set = booked_hours_by_eq.setdefault(int(b["equipment_id"]), set())
+        hours_set.update(range(int(b["start_hour"]), int(b["end_hour"])))
+
+    availability: dict[int, dict[str, Any]] = {}
+    for item in equipment_items:
+        total_h = max(1, int(item["lab_hours_end"]) - int(item["lab_hours_start"]))
+        occ = len(booked_hours_by_eq.get(int(item["id"]), set()))
+        availability[int(item["id"])] = {
+            "utilization_pct": round((occ / total_h) * 100, 1),
+            "open_hours": max(0, total_h - occ),
+        }
+    return availability
+
+
 @router.get("/api/departments")
-def list_departments(request: Request) -> dict[str, Any]:
+def list_departments(db: Database = Depends(get_db)) -> dict[str, Any]:
     """List all participating campus departments and cross-department policies."""
-    db = request.app.state.db
     with db.connection() as conn:
         rows = conn.execute("SELECT * FROM departments ORDER BY code ASC").fetchall()
     return {"departments": [dict(r) for r in rows]}
@@ -33,17 +68,16 @@ def list_departments(request: Request) -> dict[str, Any]:
 
 @router.get("/api/equipment")
 def list_equipment(
-    request: Request,
     department: str | None = Query(default=None, max_length=16),
     category: str | None = Query(default=None, max_length=32),
     status: str | None = Query(default=None, max_length=24),
     search: str | None = Query(default=None, max_length=120),
     only_instant: bool = Query(default=False),
     target_date: str | None = Query(default=None, max_length=10),
+    db: Database = Depends(get_db),
 ) -> dict[str, Any]:
     """Browse and filter campus lab equipment with live daily availability summaries."""
-    db = request.app.state.db
-    day_iso = validate_iso_date(target_date) if target_date else date.today().isoformat()
+    day_iso = parse_optional_iso_date(target_date, field_name="target_date") or date.today().isoformat()
 
     clauses: list[str] = []
     params: list[Any] = []
@@ -80,43 +114,25 @@ def list_equipment(
             """,
             params,
         ).fetchall()
+        items = [_enrich_equipment_row(dict(row)) for row in rows]
+        availability_map = _load_daily_availability_map(conn, items, day_iso)
 
-        booking_rows = conn.execute(
-            """
-            SELECT equipment_id, start_hour, end_hour
-            FROM bookings
-            WHERE booking_date = ?
-              AND status IN ('confirmed', 'conflict')
-            """,
-            (day_iso,),
-        ).fetchall()
-
-    booked_hours_by_eq: dict[int, set[int]] = {}
-    for b in booking_rows:
-        hours_set = booked_hours_by_eq.setdefault(int(b["equipment_id"]), set())
-        hours_set.update(range(int(b["start_hour"]), int(b["end_hour"])))
-
-    items: list[dict[str, Any]] = []
-    for row in rows:
-        item = _enrich_equipment_row(dict(row))
-        total_h = max(1, int(item["lab_hours_end"]) - int(item["lab_hours_start"]))
-        occ = len(booked_hours_by_eq.get(item["id"], set()))
-        item["utilization_today_pct"] = round((occ / total_h) * 100, 1)
-        item["open_hours_today"] = max(0, total_h - occ)
-        items.append(item)
+    for item in items:
+        avail = availability_map.get(item["id"], {"utilization_pct": 0.0, "open_hours": 0})
+        item["utilization_today_pct"] = avail["utilization_pct"]
+        item["open_hours_today"] = avail["open_hours"]
 
     return {"date": day_iso, "count": len(items), "equipment": items}
 
 
 @router.get("/api/equipment/{equipment_id}")
 def get_equipment_detail(
-    request: Request,
     equipment_id: int,
     target_date: str | None = Query(default=None, max_length=10),
+    db: Database = Depends(get_db),
 ) -> dict[str, Any]:
     """Return full specs, cross-department equivalents, and schedule for a single resource."""
-    db = request.app.state.db
-    day_iso = validate_iso_date(target_date) if target_date else date.today().isoformat()
+    day_iso = parse_optional_iso_date(target_date, field_name="target_date") or date.today().isoformat()
 
     with db.connection() as conn:
         schedule = get_equipment_schedule(conn, equipment_id, day_iso)
@@ -142,16 +158,12 @@ def get_equipment_detail(
 
 @router.get("/api/equipment/{equipment_id}/schedule")
 def get_schedule(
-    request: Request,
     equipment_id: int,
     target_date: str | None = Query(default=None, max_length=10),
+    db: Database = Depends(get_db),
 ) -> dict[str, Any]:
     """Return the hourly booking grid for an equipment item on target_date."""
-    db = request.app.state.db
-    try:
-        day_iso = validate_iso_date(target_date) if target_date else date.today().isoformat()
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail="target_date must be YYYY-MM-DD.") from exc
+    day_iso = parse_optional_iso_date(target_date, field_name="target_date") or date.today().isoformat()
 
     with db.connection() as conn:
         schedule = get_equipment_schedule(conn, equipment_id, day_iso)
@@ -162,11 +174,11 @@ def get_schedule(
 
 @router.post("/api/ai/discover")
 def ai_discover_equipment(
-    request: Request, payload: AIDiscoveryRequest
+    payload: AIDiscoveryRequest,
+    db: Database = Depends(get_db),
+    genai_service: GenAIService = Depends(get_genai),
 ) -> dict[str, Any]:
-    """GenAI-powered natural-language equipment discovery across departments."""
-    db = request.app.state.db
-    genai_service = request.app.state.genai
+    """GenAI-powered natural-language equipment discovery across departments (zero N+1 queries)."""
     day_iso = payload.preferred_date or date.today().isoformat()
 
     with db.connection() as conn:
@@ -179,15 +191,7 @@ def ai_discover_equipment(
             """
         ).fetchall()
         equipment_items = [_enrich_equipment_row(dict(r)) for r in rows]
-
-        availability_by_id: dict[int, dict[str, Any]] = {}
-        for item in equipment_items:
-            sched = get_equipment_schedule(conn, item["id"], day_iso)
-            if sched:
-                availability_by_id[item["id"]] = {
-                    "utilization_pct": sched["utilization_pct"],
-                    "open_hours": sched["open_hours"],
-                }
+        availability_by_id = _load_daily_availability_map(conn, equipment_items, day_iso)
 
     return genai_service.discover_equipment(
         query=payload.query,

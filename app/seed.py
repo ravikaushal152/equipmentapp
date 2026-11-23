@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 
 from app.database import Database
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+from app.utils import utc_now_iso
 
 
 def seed_database(db: Database, *, force: bool = False) -> None:
@@ -27,7 +24,7 @@ def seed_database(db: Database, *, force: bool = False) -> None:
             conn.execute("DELETE FROM equipment")
             conn.execute("DELETE FROM departments")
 
-        now = _utc_now()
+        now = utc_now_iso()
         today = date.today()
         tomorrow = today + timedelta(days=1)
         day_after = today + timedelta(days=2)

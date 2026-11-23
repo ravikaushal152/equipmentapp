@@ -113,3 +113,37 @@ def test_resolve_all_seeded_conflicts_updates_analytics_cleanly(client):
     analytics = client.get("/api/analytics/utilization").json()["kpis"]
     assert analytics["open_conflicts"] == 0
     assert analytics["resolved_conflicts"] == 4
+
+
+def test_conflict_gemini_advisor_mock_and_error_guards(client, monkeypatch):
+    open_conflicts = client.get("/api/conflicts", params={"status": "open"}).json()["conflicts"]
+    cid = open_conflicts[0]["conflict"]["id"]
+
+    # First fetch deterministic plan IDs so mock picks a valid plan_id
+    baseline = client.get(f"/api/conflicts/{cid}/analyze").json()
+    valid_plan_id = baseline["feasible_plans"][0]["plan_id"]
+
+    monkeypatch.setattr(
+        client.app.state.genai,
+        "_call_gemini_json",
+        lambda _prompt: {
+            "recommended_plan_id": valid_plan_id,
+            "executive_summary": "Cross-department reallocation keeps both teams unblocked.",
+            "fairness_rationale": "Urgent capstone with 0h prior usage retains A100 while flexible team gets equivalent GPU.",
+            "student_notification_draft": "Your session has been smoothly reallocated with +1 Priority Credit.",
+        },
+    )
+    analyzed = client.get(f"/api/conflicts/{cid}/analyze")
+    assert analyzed.status_code == 200
+    assert analyzed.json()["ai_advice"]["ai_mode"] == "gemini"
+    assert analyzed.json()["ai_advice"]["recommended_plan_id"] == valid_plan_id
+
+    # Invalid conflict id -> 404; invalid plan id -> 409
+    assert client.get("/api/conflicts/9999/analyze").status_code == 404
+    assert (
+        client.post(
+            f"/api/conflicts/{cid}/resolve",
+            json={"plan_id": "nonexistent_plan", "resolved_by": "Coordinator"},
+        ).status_code
+        == 409
+    )

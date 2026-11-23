@@ -43,11 +43,28 @@ function showToast(message, variant = "success") {
     onClick: () => clearNode(region),
   });
   region.appendChild(
-    el("div", { className: `toast toast-${variant}` }, [
+    el("div", { className: `toast toast-${variant}`, role: variant === "error" ? "alert" : "status" }, [
       el("span", { text: message }),
       dismissBtn,
     ])
   );
+}
+
+function validateRequiredFields(fieldIds) {
+  let firstInvalid = null;
+  for (const id of fieldIds) {
+    const field = document.getElementById(id);
+    if (!field) continue;
+    const ok = field.checkValidity() && String(field.value || "").trim().length > 0;
+    field.setAttribute("aria-invalid", ok ? "false" : "true");
+    if (!ok && !firstInvalid) firstInvalid = field;
+  }
+  if (firstInvalid) {
+    firstInvalid.focus();
+    showToast("Please complete all highlighted required fields before submitting.", "warning");
+    return false;
+  }
+  return true;
 }
 
 /* ---------- Theme & Accessible Tab Navigation ---------- */
@@ -88,8 +105,11 @@ function switchTab(tabName, { focusTab = false } = {}) {
     if (selected && focusTab) tab.focus();
   }
 
+  window.scrollTo({ top: 0, behavior: "auto" });
+
   if (tabName === "booking") {
     loadScheduleAndSmartSlots();
+    loadActiveBookings();
   } else if (tabName === "requests") {
     loadStudentRequests();
   } else if (tabName === "approvals") {
@@ -161,6 +181,10 @@ async function refreshHeaderStatus() {
     document.getElementById("header-approval-count").textContent = String(pendingApprovals);
     document.getElementById("tab-badge-conflicts").textContent = String(openConflicts);
     document.getElementById("tab-badge-approvals").textContent = String(pendingApprovals);
+    const srConflicts = document.getElementById("tab-sr-conflicts");
+    const srApprovals = document.getElementById("tab-sr-approvals");
+    if (srConflicts) srConflicts.textContent = ` (${openConflicts} open)`;
+    if (srApprovals) srApprovals.textContent = ` (${pendingApprovals} pending)`;
   } catch (err) {
     showToast(`Unable to load system status: ${err.message}`, "error");
   }
@@ -299,14 +323,19 @@ async function handleAIDiscovery(event) {
   event.preventDefault();
   const submitBtn = document.getElementById("ai-discover-submit");
   const container = document.getElementById("ai-discover-results");
-  const query = document.getElementById("ai-query").value.trim();
+  const queryInput = document.getElementById("ai-query");
+  const query = queryInput.value.trim();
   if (query.length < 4) {
+    queryInput.setAttribute("aria-invalid", "true");
+    queryInput.focus();
     showToast("Please describe what you need in at least 4 characters.", "warning");
     return;
   }
+  queryInput.setAttribute("aria-invalid", "false");
 
   submitBtn.disabled = true;
   submitBtn.textContent = "Analyzing campus labs…";
+  container.setAttribute("aria-busy", "true");
 
   try {
     const payload = {
@@ -367,6 +396,7 @@ async function handleAIDiscovery(event) {
   } catch (err) {
     showToast(`AI discovery error: ${err.message}`, "error");
   } finally {
+    container.removeAttribute("aria-busy");
     submitBtn.disabled = false;
     submitBtn.textContent = "Find Best Resources";
   }
@@ -482,6 +512,17 @@ async function loadScheduleAndSmartSlots() {
 
 async function handleCreateBooking(event) {
   event.preventDefault();
+  if (
+    !validateRequiredFields([
+      "book-student-name",
+      "book-student-id",
+      "book-student-dept",
+      "book-project-title",
+      "book-deadline",
+    ])
+  ) {
+    return;
+  }
   const btn = document.getElementById("booking-submit-btn");
   btn.disabled = true;
   try {
@@ -503,7 +544,12 @@ async function handleCreateBooking(event) {
     };
     const res = await api.createBooking(payload);
     showToast(res.message, res.conflict_detected ? "warning" : "success");
-    await Promise.all([loadScheduleAndSmartSlots(), refreshHeaderStatus(), loadEquipmentCatalog()]);
+    await Promise.all([
+      loadScheduleAndSmartSlots(),
+      loadActiveBookings(),
+      refreshHeaderStatus(),
+      loadEquipmentCatalog(),
+    ]);
     if (res.conflict_detected && res.conflict_id) {
       state.selectedConflictId = res.conflict_id;
       switchTab("conflicts");
@@ -512,6 +558,63 @@ async function handleCreateBooking(event) {
     showToast(err.message, "error");
   } finally {
     btn.disabled = false;
+  }
+}
+
+async function loadActiveBookings() {
+  const list = document.getElementById("active-bookings-list");
+  const countEl = document.getElementById("active-bookings-count");
+  if (!list || !countEl) return;
+  try {
+    const data = await api.getBookings();
+    const active = data.bookings.filter((b) => b.status === "confirmed" || b.status === "conflict");
+    countEl.textContent = `${active.length} active`;
+    clearNode(list);
+    if (!active.length) {
+      list.appendChild(el("p", { className: "muted", text: "No active bookings right now." }));
+      return;
+    }
+
+    for (const b of active.slice(0, 12)) {
+      list.appendChild(
+        el("article", { className: "list-card" }, [
+          el("div", { className: "list-card-header" }, [
+            el("strong", {
+              text: `${b.equipment_name} (${b.equipment_department}) · ${b.booking_date} · ${formatHour(b.start_hour)}–${formatHour(b.end_hour)}`,
+            }),
+            pill(b.status.toUpperCase(), statusPillVariant(b.status)),
+          ]),
+          el("div", { className: "card-meta-row" }, [
+            el("span", { text: `${b.student_name} (${b.student_department})` }),
+            el("span", { text: `Project: ${b.project_title}` }),
+            el("span", { text: `Deadline: ${b.project_deadline}` }),
+          ]),
+          el("div", { className: "card-actions" }, [
+            el("button", {
+              type: "button",
+              className: "btn btn-ghost btn-sm",
+              text: "Cancel & Release Slot",
+              onClick: async () => {
+                try {
+                  await api.cancelBooking(b.id);
+                  showToast(`Booking #${b.id} cancelled and slot released.`, "success");
+                  await Promise.all([
+                    loadActiveBookings(),
+                    loadScheduleAndSmartSlots(),
+                    refreshHeaderStatus(),
+                    loadEquipmentCatalog(),
+                  ]);
+                } catch (err) {
+                  showToast(err.message, "error");
+                }
+              },
+            }),
+          ]),
+        ])
+      );
+    }
+  } catch (err) {
+    showToast(`Failed to load bookings: ${err.message}`, "error");
   }
 }
 
@@ -562,6 +665,20 @@ function renderBriefBox(brief) {
 
 async function handleCreateProjectRequest(event) {
   event.preventDefault();
+  if (
+    !validateRequiredFields([
+      "req-student-name",
+      "req-student-id",
+      "req-email",
+      "req-student-dept",
+      "req-project-title",
+      "req-date",
+      "req-deadline",
+      "req-justification",
+    ])
+  ) {
+    return;
+  }
   const btn = document.getElementById("req-submit-btn");
   btn.disabled = true;
   try {
@@ -817,6 +934,7 @@ async function loadConflicts() {
 
 async function renderConflictAnalysis(conflictId) {
   const detail = document.getElementById("conflict-detail");
+  detail.setAttribute("aria-busy", "true");
   clearNode(detail);
   detail.appendChild(el("p", { className: "muted", text: "Evaluating fairness scores and verified feasible allocations…" }));
 
@@ -936,6 +1054,8 @@ async function renderConflictAnalysis(conflictId) {
     detail.appendChild(plansWrap);
   } catch (err) {
     showToast(`Unable to analyze conflict: ${err.message}`, "error");
+  } finally {
+    detail.removeAttribute("aria-busy");
   }
 }
 
@@ -1014,20 +1134,30 @@ async function loadAnalytics() {
     }
 
     const peakChart = document.getElementById("peak-hours-chart");
+    peakChart.setAttribute("role", "list");
+    peakChart.setAttribute("aria-label", "Active campus lab sessions by hour");
     clearNode(peakChart);
     const maxSessions = Math.max(1, ...data.peak_hours.map((p) => p.active_sessions));
     for (const p of data.peak_hours) {
+      const bucket = Math.min(10, Math.max(0, Math.round((p.active_sessions / maxSessions) * 10)));
       const bar = el("div", {
-        className: "peak-bar",
-        "aria-label": `${p.label}: ${p.active_sessions} active sessions`,
+        className: `peak-bar peak-h-${bucket}`,
+        "aria-hidden": "true",
       });
-      bar.style.height = `${Math.max(8, Math.round((p.active_sessions / maxSessions) * 120))}px`;
       peakChart.appendChild(
-        el("div", { className: "peak-col" }, [
-          el("span", { className: "peak-count", text: String(p.active_sessions) }),
-          bar,
-          el("span", { className: "peak-label", text: p.label.slice(0, 2) }),
-        ])
+        el(
+          "div",
+          {
+            className: "peak-col",
+            role: "listitem",
+            "aria-label": `${p.label}: ${p.active_sessions} active session${p.active_sessions === 1 ? "" : "s"}`,
+          },
+          [
+            el("span", { className: "peak-count", text: String(p.active_sessions) }),
+            bar,
+            el("span", { className: "peak-label", text: p.label.slice(0, 2) }),
+          ]
+        )
       );
     }
 
@@ -1126,6 +1256,12 @@ async function bootstrap() {
   document
     .getElementById("conflict-status-filter")
     .addEventListener("change", loadConflicts);
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      clearNode(document.getElementById("toast-region"));
+    }
+  });
 
   await loadDepartmentsAndEquipmentSelects();
   await Promise.all([loadEquipmentCatalog(), refreshHeaderStatus()]);

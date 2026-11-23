@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -15,7 +16,11 @@ from app import __version__
 from app.config import Settings, load_settings
 from app.database import Database
 from app.routers import analytics, bookings, conflicts, equipment, requests
-from app.security import RateLimitMiddleware, SecurityHeadersMiddleware
+from app.security import (
+    MaxBodySizeMiddleware,
+    RateLimitMiddleware,
+    SecurityHeadersMiddleware,
+)
 from app.seed import seed_database
 from app.services.genai_service import GenAIService
 
@@ -30,7 +35,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     genai_service = GenAIService(cfg)
 
     @asynccontextmanager
-    async def lifespan(application: FastAPI):
+    async def lifespan(_application: FastAPI):
         db.init_schema()
         seed_database(db)
         yield
@@ -49,13 +54,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.db = db
     app.state.genai = genai_service
 
-    # Security headers & lightweight sliding-window rate limiting
+    # Compression, bounded rate limiting, payload-size guard, and strict security headers
+    app.add_middleware(GZipMiddleware, minimum_size=500)
+    app.add_middleware(MaxBodySizeMiddleware, max_bytes=65_536)
     app.add_middleware(
         RateLimitMiddleware,
         general_rpm=cfg.rate_limit_general_rpm,
         ai_rpm=cfg.rate_limit_ai_rpm,
     )
-    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(
+        SecurityHeadersMiddleware,
+        is_production=(cfg.env == "production"),
+    )
 
     # Register modular API routers
     app.include_router(equipment.router)

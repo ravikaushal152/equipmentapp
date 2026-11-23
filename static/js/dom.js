@@ -1,5 +1,6 @@
 /**
  * Safe DOM element creation utilities preventing XSS by using textContent and DOM nodes only.
+ * Uses native HTML5 <progress> elements so strict CSP (style-src 'self') needs zero inline styles.
  */
 
 export function clearNode(node) {
@@ -46,22 +47,19 @@ export function pill(text, variant = "neutral") {
 }
 
 export function progressBar(label, valueText, percent, fillClass = "") {
-  const clamped = Math.max(0, Math.min(100, Number(percent) || 0));
-  const fill = el("div", {
-    className: `progress-fill ${fillClass}`.trim(),
-    role: "progressbar",
-    "aria-label": label,
-    "aria-valuenow": String(Math.round(clamped)),
-    "aria-valuemin": "0",
-    "aria-valuemax": "100",
+  const clamped = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+  const meter = el("progress", {
+    className: `progress-meter ${fillClass}`.trim(),
+    value: String(clamped),
+    max: "100",
+    "aria-label": `${label}: ${valueText}`,
   });
-  fill.style.width = `${clamped}%`;
 
   return el("div", { className: "score-bar-row" }, [
     el("div", { className: "score-bar-label" }, [
       el("span", { text: label }),
       el("strong", { text: valueText }),
     ]),
-    el("div", { className: "progress-track" }, [fill]),
+    meter,
   ]);
 }

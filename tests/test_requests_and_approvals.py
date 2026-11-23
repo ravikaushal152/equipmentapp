@@ -138,3 +138,40 @@ def test_faculty_revision_then_rejection_flow(client):
     )
     assert rej.status_code == 200
     assert rej.json()["status"] == "rejected"
+
+
+def test_project_brief_gemini_mock_and_not_found_guards(client, monkeypatch):
+    deadline = (date.today() + timedelta(days=3)).isoformat()
+    monkeypatch.setattr(
+        client.app.state.genai,
+        "_call_gemini_json",
+        lambda _prompt: {
+            "readiness_score": 95,
+            "urgency_tier": "high",
+            "summary": "High-readiness cross-department capstone request.",
+            "strengths": ["Clear deliverables", "Safety verified"],
+            "prerequisites_check": "Verify lab badge on arrival.",
+            "recommended_action": "Approve",
+        },
+    )
+    res = client.post(
+        "/api/ai/project-brief",
+        json={
+            "equipment_id": 1,
+            "student_department": "BIO",
+            "project_title": "Protein Folding Inference Run",
+            "project_track": "capstone",
+            "project_deadline": deadline,
+            "team_size": 3,
+            "justification": "Fine-tuning protein stability classifier ahead of final capstone defense.",
+            "safety_acknowledged": True,
+        },
+    )
+    assert res.status_code == 200
+    assert res.json()["brief"]["ai_mode"] == "gemini"
+    assert res.json()["brief"]["readiness_score"] == 95
+
+    assert client.post(
+        "/api/requests/9999/decision",
+        json={"decision": "approved", "reviewer_name": "Dr. Test"},
+    ).status_code == 404

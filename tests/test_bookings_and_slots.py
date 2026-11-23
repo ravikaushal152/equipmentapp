@@ -137,3 +137,42 @@ def test_booking_validation_and_cancellation(client):
     # Second cancel fails cleanly
     again = client.patch(f"/api/bookings/{booking_id}/cancel")
     assert again.status_code == 400
+
+    # Non-existent resources & bookings return clean 404s
+    assert client.patch("/api/bookings/9999/cancel").status_code == 404
+    assert (
+        client.post(
+            "/api/bookings/smart-slots",
+            json={"equipment_id": 9999, "preferred_date": day_out, "duration_hours": 2},
+        ).status_code
+        == 404
+    )
+
+
+def test_list_bookings_and_cross_dept_analytics_update(client):
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    before = client.get("/api/analytics/utilization").json()["kpis"]["active_bookings"]
+
+    res = client.post(
+        "/api/bookings",
+        json={
+            "equipment_id": 12,  # ROBO Prusa XL
+            "student_name": "Meera Iyer",
+            "student_id": "BIO23B022",
+            "student_department": "BIO",
+            "project_title": "Microfluidic Chip Holder Enclosure",
+            "project_track": "research",
+            "project_deadline": (date.today() + timedelta(days=5)).isoformat(),
+            "booking_date": tomorrow,
+            "start_hour": 15,
+            "end_hour": 17,
+        },
+    )
+    assert res.status_code == 201
+
+    listed = client.get("/api/bookings", params={"department": "ROBO", "booking_date": tomorrow})
+    assert listed.status_code == 200
+    assert any(b["student_name"] == "Meera Iyer" for b in listed.json()["bookings"])
+
+    after = client.get("/api/analytics/utilization").json()["kpis"]["active_bookings"]
+    assert after == before + 1

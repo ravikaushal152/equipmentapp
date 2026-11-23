@@ -4,47 +4,39 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.database import Database
 from app.schemas import ConflictApplyRequest
-from app.services.conflict_resolver import apply_resolution_plan, build_conflict_analysis
+from app.services.conflict_resolver import (
+    apply_resolution_plan,
+    build_conflict_analysis,
+    list_conflict_summaries,
+)
+from app.services.genai_service import GenAIService
+from app.utils import get_db, get_genai
 
 router = APIRouter(tags=["Scheduling Conflict Resolution"])
 
 
 @router.get("/api/conflicts")
 def list_conflicts(
-    request: Request,
     status: str = Query(default="all", pattern="^(open|resolved|all)$"),
+    db: Database = Depends(get_db),
 ) -> dict[str, Any]:
-    """List scheduling conflicts with fairness-scored competing bookings."""
-    db = request.app.state.db
-    where_sql = "" if status == "all" else "WHERE status = ?"
-    params = () if status == "all" else (status,)
-
+    """List scheduling conflicts with fairness-scored competing bookings in bulk."""
     with db.connection() as conn:
-        ids = [
-            int(r["id"])
-            for r in conn.execute(
-                f"""
-                SELECT id FROM conflicts
-                {where_sql}
-                ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END, conflict_date ASC, id DESC
-                """,
-                params,
-            ).fetchall()
-        ]
-        items = [build_conflict_analysis(conn, cid) for cid in ids]
-
+        items = list_conflict_summaries(conn, status=status)
     return {"count": len(items), "conflicts": items}
 
 
 @router.get("/api/conflicts/{conflict_id}/analyze")
-def analyze_conflict(request: Request, conflict_id: int) -> dict[str, Any]:
+def analyze_conflict(
+    conflict_id: int,
+    db: Database = Depends(get_db),
+    genai_service: GenAIService = Depends(get_genai),
+) -> dict[str, Any]:
     """Run deterministic fairness scoring + feasible plan generation + Gemini advisor commentary."""
-    db = request.app.state.db
-    genai_service = request.app.state.genai
-
     with db.connection() as conn:
         try:
             analysis = build_conflict_analysis(conn, conflict_id)
@@ -57,10 +49,11 @@ def analyze_conflict(request: Request, conflict_id: int) -> dict[str, Any]:
 
 @router.post("/api/conflicts/{conflict_id}/resolve")
 def resolve_conflict(
-    request: Request, conflict_id: int, payload: ConflictApplyRequest
+    conflict_id: int,
+    payload: ConflictApplyRequest,
+    db: Database = Depends(get_db),
 ) -> dict[str, Any]:
     """Atomically apply a verified conflict resolution plan to resolve overlaps cleanly."""
-    db = request.app.state.db
     with db.transaction() as conn:
         try:
             return apply_resolution_plan(

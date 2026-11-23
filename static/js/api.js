@@ -44,10 +44,22 @@ export const api = {
     requestJson(`/api/equipment/${equipmentId}/schedule?target_date=${encodeURIComponent(targetDate)}`),
   discoverAI: (body) =>
     requestJson("/api/ai/discover", { method: "POST", body: JSON.stringify(body) }),
+  getBookings: (params = {}) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== "" && v !== null && v !== undefined) {
+        qs.set(k, String(v));
+      }
+    }
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return requestJson(`/api/bookings${suffix}`);
+  },
   getSmartSlots: (body) =>
     requestJson("/api/bookings/smart-slots", { method: "POST", body: JSON.stringify(body) }),
   createBooking: (body) =>
     requestJson("/api/bookings", { method: "POST", body: JSON.stringify(body) }),
+  cancelBooking: (bookingId) =>
+    requestJson(`/api/bookings/${bookingId}/cancel`, { method: "PATCH" }),
   getRequests: (status = "all") =>
     requestJson(`/api/requests?status=${encodeURIComponent(status)}`),
   previewBrief: (body) =>

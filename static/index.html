@@ -106,6 +106,7 @@
         >
           4. Faculty Approvals
           <span id="tab-badge-approvals" class="tab-badge" aria-hidden="true">0</span>
+          <span id="tab-sr-approvals" class="sr-only"> (0 pending)</span>
         </button>
         <button
           type="button"
@@ -119,6 +120,7 @@
         >
           5. Conflict Resolver
           <span id="tab-badge-conflicts" class="tab-badge tab-badge-warn" aria-hidden="true">0</span>
+          <span id="tab-sr-conflicts" class="sr-only"> (0 open)</span>
         </button>
         <button
           type="button"
@@ -437,6 +439,19 @@
             </div>
           </form>
         </div>
+      </div>
+
+      <div class="card">
+        <div class="section-header">
+          <div>
+            <h2>Active Campus Bookings</h2>
+            <p class="muted">
+              Review upcoming confirmed and conflicted sessions, or release a slot early to improve campus lab utilization.
+            </p>
+          </div>
+          <span id="active-bookings-count" class="pill pill-neutral">Loading…</span>
+        </div>
+        <div id="active-bookings-list" class="stack-list" aria-live="polite"></div>
       </div>
     </section>
 

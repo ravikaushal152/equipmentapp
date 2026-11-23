@@ -3,33 +3,30 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.database import Database
 from app.schemas import (
     FacultyDecisionRequest,
     ProjectBriefPreviewRequest,
     ProjectRequestCreate,
 )
 from app.security import sanitize_text
+from app.services.genai_service import GenAIService
 from app.services.scheduler import find_overlapping_bookings
+from app.utils import get_db, get_genai, utc_now_iso
 
 router = APIRouter(tags=["Project Requests & Faculty Approvals"])
 
 
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
 @router.get("/api/requests")
 def list_project_requests(
-    request: Request,
     status: str | None = Query(default=None, max_length=24),
+    db: Database = Depends(get_db),
 ) -> dict[str, Any]:
-    """List project-based access requests with AI briefs and live overlap checks."""
-    db = request.app.state.db
+    """List project-based access requests with AI briefs and bulk-checked overlap flags."""
     clauses: list[str] = []
     params: list[Any] = []
     if status and status != "all":
@@ -52,35 +49,47 @@ def list_project_requests(
             params,
         ).fetchall()
 
-        results: list[dict[str, Any]] = []
-        for r in rows:
-            item = dict(r)
-            item["ai_brief"] = json.loads(item.pop("ai_brief_json") or "{}")
-            item["safety_acknowledged"] = bool(item["safety_acknowledged"])
-            item["is_cross_department"] = (
-                item["student_department"] != item["equipment_department"]
-            )
-            overlaps = find_overlapping_bookings(
-                conn,
-                int(item["equipment_id"]),
-                item["requested_date"],
-                int(item["start_hour"]),
-                int(item["end_hour"]),
-            )
-            item["has_slot_conflict"] = bool(overlaps) and item["status"] == "pending"
-            results.append(item)
+        # Single bulk query for active bookings on requested dates (eliminates N+1 queries)
+        active_bookings = conn.execute(
+            """
+            SELECT equipment_id, booking_date, start_hour, end_hour
+            FROM bookings
+            WHERE status IN ('confirmed', 'conflict')
+            """
+        ).fetchall()
+
+    slots_by_key: dict[tuple[int, str], list[tuple[int, int]]] = {}
+    for b in active_bookings:
+        key = (int(b["equipment_id"]), str(b["booking_date"]))
+        slots_by_key.setdefault(key, []).append((int(b["start_hour"]), int(b["end_hour"])))
+
+    results: list[dict[str, Any]] = []
+    for r in rows:
+        item = dict(r)
+        item["ai_brief"] = json.loads(item.pop("ai_brief_json") or "{}")
+        item["safety_acknowledged"] = bool(item["safety_acknowledged"])
+        item["is_cross_department"] = (
+            item["student_department"] != item["equipment_department"]
+        )
+        key = (int(item["equipment_id"]), str(item["requested_date"]))
+        req_start, req_end = int(item["start_hour"]), int(item["end_hour"])
+        has_overlap = any(
+            b_start < req_end and b_end > req_start
+            for b_start, b_end in slots_by_key.get(key, [])
+        )
+        item["has_slot_conflict"] = has_overlap and item["status"] == "pending"
+        results.append(item)
 
     return {"count": len(results), "requests": results}
 
 
 @router.post("/api/ai/project-brief")
 def preview_project_brief(
-    request: Request, payload: ProjectBriefPreviewRequest
+    payload: ProjectBriefPreviewRequest,
+    db: Database = Depends(get_db),
+    genai_service: GenAIService = Depends(get_genai),
 ) -> dict[str, Any]:
     """Generate an AI feasibility and safety readiness brief for a draft project request."""
-    db = request.app.state.db
-    genai_service = request.app.state.genai
-
     with db.connection() as conn:
         eq_row = conn.execute(
             "SELECT * FROM equipment WHERE id = ?", (payload.equipment_id,)
@@ -104,12 +113,12 @@ def preview_project_brief(
 
 @router.post("/api/requests", status_code=201)
 def create_project_request(
-    request: Request, payload: ProjectRequestCreate
+    payload: ProjectRequestCreate,
+    db: Database = Depends(get_db),
+    genai_service: GenAIService = Depends(get_genai),
 ) -> dict[str, Any]:
     """Submit a structured project-based access request with an AI faculty review brief."""
-    db = request.app.state.db
-    genai_service = request.app.state.genai
-    now = _utc_now()
+    now = utc_now_iso()
 
     with db.connection() as conn:
         eq_row = conn.execute(
@@ -228,11 +237,12 @@ def create_project_request(
 
 @router.post("/api/requests/{request_id}/decision")
 def review_project_request(
-    request: Request, request_id: int, payload: FacultyDecisionRequest
+    request_id: int,
+    payload: FacultyDecisionRequest,
+    db: Database = Depends(get_db),
 ) -> dict[str, Any]:
     """Faculty approval, rejection, or revision decision with automatic booking/conflict linking."""
-    db = request.app.state.db
-    now = _utc_now()
+    now = utc_now_iso()
 
     with db.transaction() as conn:
         req_row = conn.execute(

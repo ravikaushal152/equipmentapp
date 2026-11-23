@@ -51,8 +51,9 @@ Google Cloud Run — FastAPI Service (app/main.py)
 
 ## Security & Accessibility Highlights
 
-- **Security**: Strict Pydantic v2 validation (`extra="forbid"`), parameterized SQL queries throughout, HTML tag/control-char sanitization, XSS-safe DOM creation (`textContent` only—zero `innerHTML`), hardened CSP and HTTP security headers, sliding-window rate limiting, non-root Docker container, and secrets loaded strictly from environment variables.
-- **Accessibility (WCAG 2.1 AA)**: Semantic landmarks (`header`, `nav`, `main`, `footer`), skip-to-content link, ARIA `tablist` with keyboard arrow navigation, high-contrast Light & Dark themes, `aria-live="polite"` status announcements, labeled form controls, and `prefers-reduced-motion` support.
+- **Security**: Strict Pydantic v2 validation (`extra="forbid"`), parameterized SQL queries throughout, HTML tag/control-char sanitization, XSS-safe DOM creation (`textContent` only—zero `innerHTML`), strict CSP with **zero `unsafe-inline`**, HSTS in production, 64 KB payload-size guard (`413`), bounded-memory sliding-window rate limiting (`429`), non-root Docker container, and secrets loaded strictly from environment variables.
+- **Efficiency**: Bulk SQL queries eliminating N+1 patterns, SQLite WAL + memory temp store + targeted indexes, GZip response compression, static asset caching, TTL-cached GenAI queries, and a resilient multi-model Gemini fallback chain.
+- **Accessibility (WCAG 2.1 AA)**: Semantic landmarks (`header`, `nav`, `main`, `footer`), skip-to-content link, ARIA `tablist` with keyboard arrow navigation and screen-reader badge counts, native HTML5 `<progress>` meters, `aria-invalid` form error focus, high-contrast Light/Dark + `prefers-contrast: more` modes, `aria-live="polite"` announcements, and `prefers-reduced-motion` support.
 
 ---
 

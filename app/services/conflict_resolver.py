@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from typing import Any
 
 from app.services.scheduler import _find_free_windows, format_hour
+from app.utils import utc_now_iso
 
 TRACK_WEIGHTS: dict[str, float] = {
     "capstone": 86.0,
@@ -102,6 +103,89 @@ def _nearest_window(
     return min(windows, key=lambda w: (abs(w[0] - preferred_start), w[0]))
 
 
+def _serialize_conflict_meta(conflict: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": conflict["id"],
+        "equipment_id": conflict["equipment_id"],
+        "equipment_name": conflict["equipment_name"],
+        "equipment_department": conflict["equipment_department"],
+        "location": conflict["location"],
+        "conflict_date": conflict["conflict_date"],
+        "overlap_start_hour": conflict["overlap_start_hour"],
+        "overlap_end_hour": conflict["overlap_end_hour"],
+        "overlap_label": (
+            f"{format_hour(conflict['overlap_start_hour'])}–"
+            f"{format_hour(conflict['overlap_end_hour'])}"
+        ),
+        "severity": conflict["severity"],
+        "status": conflict["status"],
+        "resolution_strategy": conflict["resolution_strategy"],
+        "resolution_summary": conflict["resolution_summary"],
+        "resolved_by": conflict["resolved_by"],
+        "resolved_at": conflict["resolved_at"],
+    }
+
+
+def list_conflict_summaries(
+    conn: sqlite3.Connection, *, status: str = "all"
+) -> list[dict[str, Any]]:
+    """Return conflict list with fairness-scored bookings using only 2 bulk SQL queries."""
+    where_sql = "" if status == "all" else "WHERE c.status = ?"
+    params = () if status == "all" else (status,)
+
+    conflict_rows = [
+        dict(r)
+        for r in conn.execute(
+            f"""
+            SELECT c.*, e.name AS equipment_name, e.department_code AS equipment_department,
+                   e.location
+            FROM conflicts c
+            JOIN equipment e ON e.id = c.equipment_id
+            {where_sql}
+            ORDER BY CASE c.status WHEN 'open' THEN 0 ELSE 1 END, c.conflict_date ASC, c.id DESC
+            """,
+            params,
+        ).fetchall()
+    ]
+    if not conflict_rows:
+        return []
+
+    all_booking_ids: list[int] = []
+    parsed_ids_by_conflict: dict[int, list[int]] = {}
+    for row in conflict_rows:
+        ids = [int(i) for i in json.loads(row["competing_booking_ids_json"])]
+        parsed_ids_by_conflict[int(row["id"])] = ids
+        all_booking_ids.extend(ids)
+
+    unique_ids = sorted(set(all_booking_ids))
+    bookings_by_id: dict[int, dict[str, Any]] = {}
+    if unique_ids:
+        placeholders = ",".join("?" for _ in unique_ids)
+        rows = conn.execute(
+            f"SELECT * FROM bookings WHERE id IN ({placeholders})",  # nosec B608 - strict int placeholders
+            unique_ids,
+        ).fetchall()
+        bookings_by_id = {int(b["id"]): dict(b) for b in rows}
+
+    ref_date = date.today()
+    summaries: list[dict[str, Any]] = []
+    for row in conflict_rows:
+        ids = parsed_ids_by_conflict[int(row["id"])]
+        scored = [
+            compute_fairness_score(bookings_by_id[bid], reference_date=ref_date)
+            for bid in ids
+            if bid in bookings_by_id
+        ]
+        scored.sort(key=lambda s: (s["total_score"], -s["days_until_deadline"]), reverse=True)
+        summaries.append(
+            {
+                "conflict": _serialize_conflict_meta(row),
+                "scored_bookings": scored,
+            }
+        )
+    return summaries
+
+
 def build_conflict_analysis(
     conn: sqlite3.Connection, conflict_id: int
 ) -> dict[str, Any]:
@@ -121,15 +205,19 @@ def build_conflict_analysis(
         raise ValueError(f"Conflict {conflict_id} not found.")
 
     conflict = dict(conflict_row)
-    competing_ids: list[int] = json.loads(conflict["competing_booking_ids_json"])
+    competing_ids = [int(i) for i in json.loads(conflict["competing_booking_ids_json"])]
     if not competing_ids:
-        return {"conflict": conflict, "scored_bookings": [], "feasible_plans": []}
+        return {
+            "conflict": _serialize_conflict_meta(conflict),
+            "scored_bookings": [],
+            "feasible_plans": [],
+        }
 
     placeholders = ",".join("?" for _ in competing_ids)
     bookings = [
         dict(row)
         for row in conn.execute(
-            f"SELECT * FROM bookings WHERE id IN ({placeholders})",
+            f"SELECT * FROM bookings WHERE id IN ({placeholders})",  # nosec B608 - strict int placeholders
             competing_ids,
         ).fetchall()
     ]
@@ -463,7 +551,7 @@ def apply_resolution_plan(
     if selected is None:
         raise ValueError(f"Resolution plan '{plan_id}' is no longer available or invalid.")
 
-    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    now = utc_now_iso()
 
     # Apply each allocation update atomically
     for action in selected["actions"]:

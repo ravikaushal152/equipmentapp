@@ -3,41 +3,38 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.database import Database
 from app.schemas import BookingCreateRequest, SmartSlotRequest
-from app.security import sanitize_text, validate_iso_date
+from app.security import sanitize_text
 from app.services.scheduler import find_overlapping_bookings, recommend_smart_slots
+from app.utils import get_db, parse_optional_iso_date, utc_now_iso
 
 router = APIRouter(tags=["Bookings & Smart Scheduling"])
 
 
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
 @router.get("/api/bookings")
 def list_bookings(
-    request: Request,
     equipment_id: int | None = Query(default=None, ge=1),
     booking_date: str | None = Query(default=None, max_length=10),
     status: str | None = Query(default=None, max_length=24),
     department: str | None = Query(default=None, max_length=16),
+    db: Database = Depends(get_db),
 ) -> dict[str, Any]:
     """List lab bookings filtered by resource, date, status, or department."""
-    db = request.app.state.db
+    parsed_date = parse_optional_iso_date(booking_date, field_name="booking_date")
     clauses: list[str] = []
     params: list[Any] = []
 
     if equipment_id is not None:
         clauses.append("b.equipment_id = ?")
         params.append(equipment_id)
-    if booking_date:
+    if parsed_date:
         clauses.append("b.booking_date = ?")
-        params.append(validate_iso_date(booking_date))
+        params.append(parsed_date)
     if status:
         clauses.append("b.status = ?")
         params.append(sanitize_text(status).lower())
@@ -64,9 +61,11 @@ def list_bookings(
 
 
 @router.post("/api/bookings/smart-slots")
-def get_smart_slots(request: Request, payload: SmartSlotRequest) -> dict[str, Any]:
+def get_smart_slots(
+    payload: SmartSlotRequest,
+    db: Database = Depends(get_db),
+) -> dict[str, Any]:
     """Recommend gap-packed, conflict-free, and load-balanced lab booking slots."""
-    db = request.app.state.db
     with db.connection() as conn:
         try:
             return recommend_smart_slots(
@@ -82,10 +81,12 @@ def get_smart_slots(request: Request, payload: SmartSlotRequest) -> dict[str, An
 
 
 @router.post("/api/bookings", status_code=201)
-def create_booking(request: Request, payload: BookingCreateRequest) -> dict[str, Any]:
+def create_booking(
+    payload: BookingCreateRequest,
+    db: Database = Depends(get_db),
+) -> dict[str, Any]:
     """Book a lab slot; automatically detects overlaps and opens a resolvable conflict."""
-    db = request.app.state.db
-    now = _utc_now()
+    now = utc_now_iso()
 
     with db.transaction() as conn:
         eq = conn.execute(
@@ -228,10 +229,12 @@ def create_booking(request: Request, payload: BookingCreateRequest) -> dict[str,
 
 
 @router.patch("/api/bookings/{booking_id}/cancel")
-def cancel_booking(request: Request, booking_id: int) -> dict[str, Any]:
+def cancel_booking(
+    booking_id: int,
+    db: Database = Depends(get_db),
+) -> dict[str, Any]:
     """Cancel an active booking and release its laboratory slot."""
-    db = request.app.state.db
-    now = _utc_now()
+    now = utc_now_iso()
 
     with db.transaction() as conn:
         row = conn.execute("SELECT * FROM bookings WHERE id = ?", (booking_id,)).fetchone()
