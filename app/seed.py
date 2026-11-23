@@ -1,0 +1,861 @@
+"""Initial realistic campus laboratory dataset seeded automatically on first boot."""
+
+from __future__ import annotations
+
+import json
+from datetime import date, datetime, timedelta, timezone
+
+from app.database import Database
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def seed_database(db: Database, *, force: bool = False) -> None:
+    """Populate departments, cross-department equipment, bookings, requests, and conflicts."""
+    with db.transaction() as conn:
+        existing = conn.execute("SELECT COUNT(*) FROM departments").fetchone()[0]
+        if existing > 0 and not force:
+            return
+
+        if force:
+            conn.execute("DELETE FROM audit_logs")
+            conn.execute("DELETE FROM conflicts")
+            conn.execute("DELETE FROM project_requests")
+            conn.execute("DELETE FROM bookings")
+            conn.execute("DELETE FROM equipment")
+            conn.execute("DELETE FROM departments")
+
+        now = _utc_now()
+        today = date.today()
+        tomorrow = today + timedelta(days=1)
+        day_after = today + timedelta(days=2)
+
+        departments = [
+            (
+                "CSE",
+                "Computer Science & AI",
+                "Turing Hall",
+                "Dr. Ananya Deshmukh",
+                "ananya.deshmukh@campus.edu",
+                8,
+                20,
+                "Open to all departments for capstone and research workloads; faculty sign-off required for A100 nodes.",
+            ),
+            (
+                "ECE",
+                "Electronics & Communication",
+                "Maxwell Block",
+                "Prof. Rajesh Kulkarni",
+                "rajesh.kulkarni@campus.edu",
+                8,
+                20,
+                "Cross-department access encouraged with basic ESD & electrical safety acknowledgment.",
+            ),
+            (
+                "ROBO",
+                "Robotics & Autonomous Systems",
+                "Innovation Foundry",
+                "Dr. Meera Nair",
+                "meera.nair@campus.edu",
+                8,
+                20,
+                "Dev kits shareable campus-wide; robotic arm workstation requires quick lab orientation.",
+            ),
+            (
+                "MECH",
+                "Mechanical & Mechatronics",
+                "Tesla Workshop",
+                "Prof. Vikram Menon",
+                "vikram.menon@campus.edu",
+                8,
+                20,
+                "Open maker access for cross-department prototyping; material specs reviewed for CNC & printers.",
+            ),
+            (
+                "BIO",
+                "BioEngineering & Materials",
+                "Curie Center",
+                "Dr. Priya Subramanian",
+                "priya.subramanian@campus.edu",
+                8,
+                19,
+                "Cross-department wet-lab & spectroscopy access available with Level-1 biosafety orientation.",
+            ),
+        ]
+        conn.executemany(
+            """
+            INSERT INTO departments (
+                code, name, building, coordinator_name, coordinator_email,
+                lab_hours_start, lab_hours_end, cross_dept_policy
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            departments,
+        )
+
+        equipment_rows = [
+            (
+                "NVIDIA A100 80GB Deep Learning Workstation",
+                "CSE",
+                "laboratory_workstation",
+                "gpu_compute",
+                "Turing Hall · AI Compute Lab 302",
+                "Flagship GPU workstation for LLM fine-tuning, computer vision training, and scientific ML workloads.",
+                json.dumps(["NVIDIA A100 80GB VRAM", "64-Core EPYC", "256GB RAM", "PyTorch & CUDA 12", "Deep Learning", "Computer Vision"]),
+                1,
+                "Compute Cluster Policy Briefing",
+                1,
+                4,
+                8,
+                20,
+                "available",
+                now,
+            ),
+            (
+                "Dual-RTX 4090 Computer Vision Workstation",
+                "ROBO",
+                "laboratory_workstation",
+                "gpu_compute",
+                "Innovation Foundry · Perception Bay 104",
+                "High-throughput dual-GPU workstation tailored for YOLOv8, SLAM simulation, 3D reconstruction, and model training.",
+                json.dumps(["2x RTX 4090 48GB Total", "128GB RAM", "ROS 2 & Isaac Sim", "Computer Vision", "Deep Learning", "CUDA"]),
+                1,
+                "Standard Lab Orientation",
+                0,
+                4,
+                8,
+                20,
+                "available",
+                now,
+            ),
+            (
+                "RTX 6000 Ada Scientific Simulation Workstation",
+                "ECE",
+                "laboratory_workstation",
+                "gpu_compute",
+                "Maxwell Block · Signal & ML Lab 210",
+                "ECC-memory workstation optimized for neural network training, RF/EM field simulation, and CUDA acceleration.",
+                json.dumps(["RTX 6000 Ada 48GB ECC", "192GB RAM", "MATLAB & PyTorch", "Simulation", "Deep Learning"]),
+                1,
+                "Standard Lab Orientation",
+                0,
+                4,
+                8,
+                20,
+                "available",
+                now,
+            ),
+            (
+                "NVIDIA Jetson AGX Orin 64GB Dev Kit",
+                "ROBO",
+                "development_kit",
+                "edge_ai",
+                "Innovation Foundry · Edge Systems Rack 2",
+                "Flagship 275 TOPS embedded AI kit for autonomous drones, real-time robotics inference, and multi-camera perception.",
+                json.dumps(["275 TOPS Edge AI", "64GB Unified Memory", "JetPack & TensorRT", "Drone Vision", "ROS 2", "Embedded Linux"]),
+                1,
+                "LiPo & Embedded Hardware Safety",
+                1,
+                4,
+                8,
+                20,
+                "available",
+                now,
+            ),
+            (
+                "NVIDIA Jetson Orin Nano Super Dev Kit",
+                "CSE",
+                "development_kit",
+                "edge_ai",
+                "Turing Hall · Systems Maker Shelf 115",
+                "Compact edge AI development kit ideal for real-time object detection, IoT analytics, and portable vision prototypes.",
+                json.dumps(["67 TOPS Edge AI", "8GB Unified Memory", "CSI Camera & GPIO", "TensorRT", "Edge Inference", "IoT"]),
+                2,
+                "Standard ESD Handling",
+                0,
+                4,
+                8,
+                20,
+                "available",
+                now,
+            ),
+            (
+                "Raspberry Pi 5 + Hailo-8L AI Accelerator Kit",
+                "ECE",
+                "development_kit",
+                "edge_ai",
+                "Maxwell Block · Embedded Studio 108",
+                "Low-power edge vision & IoT kit bundled with 13 TOPS NPU HAT, sensor array, and logic interface.",
+                json.dumps(["13 TOPS Hailo-8L NPU", "Raspberry Pi 5 8GB", "Camera & I2C Sensors", "Edge AI", "IoT", "Low Power"]),
+                2,
+                "Standard ESD Handling",
+                0,
+                4,
+                8,
+                20,
+                "available",
+                now,
+            ),
+            (
+                "AMD Xilinx Kria KV260 Vision AI FPGA Kit",
+                "ECE",
+                "development_kit",
+                "fpga_prototyping",
+                "Maxwell Block · VLSI & FPGA Lab 305",
+                "Hardware-accelerated FPGA starter kit for custom RTL pipelines, real-time video DSP, and low-latency inference.",
+                json.dumps(["Zynq UltraScale+ MPSoC", "Vitis AI & Vivado", "MIPI & HDMI IO", "FPGA", "RTL", "Hardware Acceleration"]),
+                1,
+                "ESD Bench Certification",
+                1,
+                4,
+                8,
+                20,
+                "available",
+                now,
+            ),
+            (
+                "Digilent Nexys A7-100T FPGA Dev Board",
+                "CSE",
+                "development_kit",
+                "fpga_prototyping",
+                "Turing Hall · Computer Architecture Lab 204",
+                "Versatile Artix-7 FPGA prototyping kit for RISC-V softcores, digital logic design, and Verilog verification.",
+                json.dumps(["Artix-7 FPGA", "128MB DDR2", "Verilog & VHDL", "RISC-V", "Digital Logic", "FPGA"]),
+                2,
+                "Standard ESD Handling",
+                0,
+                4,
+                8,
+                20,
+                "available",
+                now,
+            ),
+            (
+                "Tektronix 4-Ch Mixed Domain Oscilloscope (MDO34)",
+                "ECE",
+                "specialized_equipment",
+                "signal_analysis",
+                "Maxwell Block · Instrumentation Bench 4",
+                "500 MHz 4-channel oscilloscope with built-in spectrum analyzer for power electronics, SPI/I2C decoding, and RF testing.",
+                json.dumps(["500 MHz Bandwidth", "4 Analog + Spectrum", "SPI/I2C/CAN Decode", "Power Electronics", "Signal Integrity"]),
+                1,
+                "High-Voltage Probe Safety",
+                1,
+                4,
+                8,
+                20,
+                "available",
+                now,
+            ),
+            (
+                "Rigol 4-Ch Digital Storage Oscilloscope Bench",
+                "MECH",
+                "specialized_equipment",
+                "signal_analysis",
+                "Tesla Workshop · Mechatronics Bay 202",
+                "200 MHz 4-channel oscilloscope bench ideal for motor control PWM inspection, sensor debugging, and embedded signals.",
+                json.dumps(["200 MHz Bandwidth", "4 Channels", "PWM & Motor Control", "Serial Protocol Decode", "Oscilloscope"]),
+                1,
+                "Basic Bench Electrical Safety",
+                0,
+                4,
+                8,
+                20,
+                "available",
+                now,
+            ),
+            (
+                "Bambu Lab X1E Carbon-Fiber 3D Printer",
+                "MECH",
+                "specialized_equipment",
+                "rapid_prototyping",
+                "Tesla Workshop · Additive Fab Lab 101",
+                "Heated-chamber engineering 3D printer supporting carbon-fiber nylon, ABS, PETG, and precision mechanical enclosures.",
+                json.dumps(["Carbon-Fiber PA-CF", "Heated Chamber 60C", "Multi-Material AMS", "CAD Enclosure", "Rapid Prototyping"]),
+                1,
+                "Additive Fab Safety Briefing",
+                0,
+                4,
+                8,
+                20,
+                "available",
+                now,
+            ),
+            (
+                "Prusa XL Multi-Tool Precision 3D Printer",
+                "ROBO",
+                "specialized_equipment",
+                "rapid_prototyping",
+                "Innovation Foundry · Chassis Fab Corner",
+                "Large-format 360mm multi-extruder printer for robot frames, soluble-support brackets, and custom sensor mounts.",
+                json.dumps(["360x360x360mm Volume", "Multi-Tool Soluble Supports", "PLA/PETG/TPU", "Robot Chassis", "3D Printing"]),
+                1,
+                "Additive Fab Safety Briefing",
+                0,
+                4,
+                8,
+                20,
+                "available",
+                now,
+            ),
+            (
+                "UR3e Collaborative Robotic Arm Workstation",
+                "ROBO",
+                "laboratory_workstation",
+                "robotics_bench",
+                "Innovation Foundry · Manipulation Cell B",
+                "6-DOF collaborative robot arm with force-torque sensing, parallel gripper, and ROS 2 MoveIt control station.",
+                json.dumps(["6-DOF Cobot Arm", "Force-Torque Sensor", "ROS 2 MoveIt", "Pick & Place", "Kinematics"]),
+                1,
+                "Cobot Cell E-Stop Certification",
+                1,
+                3,
+                8,
+                20,
+                "available",
+                now,
+            ),
+            (
+                "Agilent UV-Vis Spectrophotometer Workstation",
+                "BIO",
+                "specialized_equipment",
+                "bio_analysis",
+                "Curie Center · Analytical Lab 112",
+                "High-precision dual-beam UV-Vis spectrophotometer for nanoparticle absorbance, biosensor assays, and material optics.",
+                json.dumps(["190-1100nm Wavelength", "Dual-Beam Optics", "Biosensor Assay", "Nanomaterials", "Spectroscopy"]),
+                1,
+                "Level-1 Wet Lab Biosafety",
+                1,
+                3,
+                8,
+                19,
+                "available",
+                now,
+            ),
+        ]
+
+        conn.executemany(
+            """
+            INSERT INTO equipment (
+                name, department_code, category, compatibility_group, location,
+                description, specs_json, quantity, safety_cert_required,
+                requires_faculty_approval, max_session_hours, lab_hours_start,
+                lab_hours_end, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            equipment_rows,
+        )
+
+        # Map equipment names to IDs for readable seeding
+        eq_map = {
+            row["name"]: row["id"]
+            for row in conn.execute("SELECT id, name FROM equipment").fetchall()
+        }
+
+        a100_id = eq_map["NVIDIA A100 80GB Deep Learning Workstation"]
+        rtx4090_id = eq_map["Dual-RTX 4090 Computer Vision Workstation"]
+        jetson_agx_id = eq_map["NVIDIA Jetson AGX Orin 64GB Dev Kit"]
+        jetson_nano_id = eq_map["NVIDIA Jetson Orin Nano Super Dev Kit"]
+        kria_id = eq_map["AMD Xilinx Kria KV260 Vision AI FPGA Kit"]
+        tek_id = eq_map["Tektronix 4-Ch Mixed Domain Oscilloscope (MDO34)"]
+        bambu_id = eq_map["Bambu Lab X1E Carbon-Fiber 3D Printer"]
+        ur3e_id = eq_map["UR3e Collaborative Robotic Arm Workstation"]
+        uvvis_id = eq_map["Agilent UV-Vis Spectrophotometer Workstation"]
+
+        # Seed realistic bookings across today & tomorrow (including 3 live conflict pairs)
+        bookings_seed = [
+            # Normal confirmed bookings (including cross-department sharing!)
+            (
+                rtx4090_id,
+                "Neha Joshi",
+                "CSE22B041",
+                "CSE",
+                "3D NeRF Campus Navigation Map",
+                "capstone",
+                (today + timedelta(days=5)).isoformat(),
+                today.isoformat(),
+                9,
+                12,
+                3,
+                "flexible_time",
+                2.0,
+                0,
+                "confirmed",
+                "Cross-department CSE team utilizing ROBO vision workstation.",
+                now,
+            ),
+            (
+                bambu_id,
+                "Arjun Mehta",
+                "ROBO23M012",
+                "ROBO",
+                "Carbon-Fiber Quadcopter Gimbal Housing",
+                "competition",
+                (today + timedelta(days=4)).isoformat(),
+                today.isoformat(),
+                10,
+                13,
+                4,
+                "flexible_equipment",
+                1.5,
+                0,
+                "confirmed",
+                "Cross-department print job scheduled in MECH fab lab.",
+                now,
+            ),
+            (
+                kria_id,
+                "Tanvi Kulkarni",
+                "CSE22B088",
+                "CSE",
+                "Hardware-Accelerated Medical Ultrasound Filter",
+                "research",
+                (today + timedelta(days=8)).isoformat(),
+                today.isoformat(),
+                11,
+                14,
+                2,
+                "flexible_time",
+                3.0,
+                0,
+                "confirmed",
+                "Cross-department FPGA run approved by ECE coordinator.",
+                now,
+            ),
+            (
+                ur3e_id,
+                "Ishaan Verma",
+                "MECH22B019",
+                "MECH",
+                "Compliant Force-Controlled PCB Insertion",
+                "capstone",
+                (today + timedelta(days=6)).isoformat(),
+                tomorrow.isoformat(),
+                9,
+                11,
+                3,
+                "strict",
+                2.0,
+                0,
+                "confirmed",
+                "Completed cobot e-stop orientation.",
+                now,
+            ),
+            (
+                uvvis_id,
+                "Anika Rao",
+                "BIO23B007",
+                "BIO",
+                "Gold Nanoparticle Biosensor Calibration",
+                "research",
+                (today + timedelta(days=7)).isoformat(),
+                today.isoformat(),
+                10,
+                12,
+                2,
+                "strict",
+                2.0,
+                0,
+                "confirmed",
+                "Baseline spectral scan.",
+                now,
+            ),
+            (
+                jetson_nano_id,
+                "Kabir Malhotra",
+                "ECE24B055",
+                "ECE",
+                "Smart Traffic Helmet Detection Prototype",
+                "course_lab",
+                (today + timedelta(days=10)).isoformat(),
+                tomorrow.isoformat(),
+                10,
+                12,
+                2,
+                "both",
+                1.0,
+                0,
+                "confirmed",
+                "Cross-dept kit checkout in Turing Hall.",
+                now,
+            ),
+            # --- CONFLICT #1: A100 Workstation tomorrow 10:00–14:00 ---
+            (
+                a100_id,
+                "Aarav Sharma",
+                "ECE22B014",
+                "ECE",
+                "Real-Time Satellite Flood Segmentation",
+                "capstone",
+                (today + timedelta(days=2)).isoformat(),
+                tomorrow.isoformat(),
+                10,
+                14,
+                4,
+                "strict",
+                0.0,
+                0,
+                "conflict",
+                "Final capstone evaluation in 48 hours; requires 80GB VRAM batch training.",
+                now,
+            ),
+            (
+                a100_id,
+                "Rohan Iyer",
+                "CSE21M005",
+                "CSE",
+                "Hyperparameter Sweep for Graph Embeddings",
+                "research",
+                (today + timedelta(days=15)).isoformat(),
+                tomorrow.isoformat(),
+                10,
+                14,
+                1,
+                "both",
+                10.0,
+                0,
+                "conflict",
+                "Exploratory parameter sweep; fits in 48GB GPU memory as well.",
+                now,
+            ),
+            # --- CONFLICT #2: Jetson AGX Orin tomorrow 14:00–17:00 ---
+            (
+                jetson_agx_id,
+                "Sneha Patel",
+                "ROBO22B031",
+                "ROBO",
+                "Autonomous Drone Obstacle Avoidance Demo",
+                "competition",
+                (today + timedelta(days=3)).isoformat(),
+                tomorrow.isoformat(),
+                14,
+                17,
+                3,
+                "strict",
+                2.0,
+                0,
+                "conflict",
+                "National robotics qualifier flight test requires full 64GB Orin multi-camera pipeline.",
+                now,
+            ),
+            (
+                jetson_agx_id,
+                "Karthik Rao",
+                "MECH23B062",
+                "MECH",
+                "Predictive Bearing Fault Edge Classifier",
+                "course_lab",
+                (today + timedelta(days=9)).isoformat(),
+                tomorrow.isoformat(),
+                14,
+                17,
+                2,
+                "both",
+                6.0,
+                0,
+                "conflict",
+                "Lightweight CNN inference (<4GB RAM); can run on equivalent edge AI kit or another slot.",
+                now,
+            ),
+            # --- CONFLICT #3: Tektronix Oscilloscope today 14:00–16:00 ---
+            (
+                tek_id,
+                "Divya Krishnan",
+                "MECH22B048",
+                "MECH",
+                "BLDC Motor Inverter Switching Noise Audit",
+                "capstone",
+                (today + timedelta(days=4)).isoformat(),
+                today.isoformat(),
+                14,
+                16,
+                3,
+                "flexible_time",
+                1.0,
+                1,
+                "conflict",
+                "Cross-dept capstone power-stage validation; yielded a slot earlier this week.",
+                now,
+            ),
+            (
+                tek_id,
+                "Siddharth Verma",
+                "ECE23B079",
+                "ECE",
+                "SPI Sensor Bus Timing Verification",
+                "prototype",
+                (today + timedelta(days=12)).isoformat(),
+                today.isoformat(),
+                14,
+                16,
+                2,
+                "both",
+                8.0,
+                0,
+                "conflict",
+                "Standard 20MHz SPI debug; compatible with 200MHz Rigol oscilloscope.",
+                now,
+            ),
+            # Pre-resolved historical booking example for utilization & resolved stats
+            (
+                a100_id,
+                "Meghna Nair",
+                "BIO22M018",
+                "BIO",
+                "Protein Folding Transformer Fine-Tune",
+                "research",
+                (today + timedelta(days=6)).isoformat(),
+                today.isoformat(),
+                15,
+                18,
+                3,
+                "flexible_time",
+                1.0,
+                1,
+                "confirmed",
+                "Allocated via LabLink fair conflict resolution earlier today.",
+                now,
+            ),
+        ]
+
+        booking_ids: list[int] = []
+        for row in bookings_seed:
+            cur = conn.execute(
+                """
+                INSERT INTO bookings (
+                    equipment_id, student_name, student_id, student_department,
+                    project_title, project_track, project_deadline, booking_date,
+                    start_hour, end_hour, team_size, flexibility,
+                    prior_hours_this_week, priority_credit, status, notes, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                row,
+            )
+            booking_ids.append(int(cur.lastrowid))
+
+        # Conflict booking pairs correspond to indices 6&7, 8&9, 10&11
+        conflicts_seed = [
+            (
+                a100_id,
+                tomorrow.isoformat(),
+                10,
+                14,
+                json.dumps([booking_ids[6], booking_ids[7]]),
+                "high",
+                "open",
+                "",
+                "",
+                "",
+                now,
+                None,
+            ),
+            (
+                jetson_agx_id,
+                tomorrow.isoformat(),
+                14,
+                17,
+                json.dumps([booking_ids[8], booking_ids[9]]),
+                "high",
+                "open",
+                "",
+                "",
+                "",
+                now,
+                None,
+            ),
+            (
+                tek_id,
+                today.isoformat(),
+                14,
+                16,
+                json.dumps([booking_ids[10], booking_ids[11]]),
+                "medium",
+                "open",
+                "",
+                "",
+                "",
+                now,
+                None,
+            ),
+            # 1 already-resolved conflict for dashboard analytics history
+            (
+                a100_id,
+                today.isoformat(),
+                15,
+                18,
+                json.dumps([booking_ids[12]]),
+                "medium",
+                "resolved",
+                "cross_dept_reallocation",
+                "Preserved BIO research team on A100 and reallocated exploratory sweep to ECE RTX 6000 Ada workstation.",
+                "Dr. Ananya Deshmukh",
+                now,
+                now,
+            ),
+        ]
+        conn.executemany(
+            """
+            INSERT INTO conflicts (
+                equipment_id, conflict_date, overlap_start_hour, overlap_end_hour,
+                competing_booking_ids_json, severity, status, resolution_strategy,
+                resolution_summary, resolved_by, created_at, resolved_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            conflicts_seed,
+        )
+
+        # Seed 3 realistic pending project-based cross-department access requests
+        requests_seed = [
+            (
+                "Priyanka Sen",
+                "MECH22B029",
+                "priyanka.sen@campus.edu",
+                "MECH",
+                "Vision-Guided Robotic Welding Seam Tracker",
+                "capstone",
+                (today + timedelta(days=5)).isoformat(),
+                3,
+                ur3e_id,
+                day_after.isoformat(),
+                10,
+                13,
+                "Our MECH capstone integrates an RGB-D seam camera with the Robotics UR3e arm to validate sub-millimeter path correction before our final jury presentation.",
+                1,
+                "flexible_time",
+                1.0,
+                json.dumps(
+                    {
+                        "readiness_score": 91,
+                        "urgency_tier": "high",
+                        "summary": "High-impact cross-department capstone with clear safety confirmation and well-scoped 3-hour validation window.",
+                        "strengths": [
+                            "Strong cross-department MECH -> ROBO collaboration",
+                            "Cobot safety orientation acknowledged",
+                            "Realistic 3-hour test window before jury deadline",
+                        ],
+                        "prerequisites_check": "Verify Cobot Cell E-Stop Certification badge at Innovation Foundry reception.",
+                        "recommended_action": "Approve",
+                        "ai_mode": "seeded_brief",
+                    }
+                ),
+                "pending",
+                "",
+                "",
+                None,
+                now,
+                None,
+            ),
+            (
+                "Vikrant Deshpande",
+                "CSE23B104",
+                "vikrant.d@campus.edu",
+                "CSE",
+                "Low-Latency ECG Arrhythmia Classifier on FPGA",
+                "research",
+                (today + timedelta(days=9)).isoformat(),
+                2,
+                kria_id,
+                tomorrow.isoformat(),
+                15,
+                18,
+                "Porting our quantized 1D-CNN model to Xilinx Kria KV260 via Vitis AI to benchmark inference latency and power draw for an IEEE student paper.",
+                1,
+                "both",
+                2.5,
+                json.dumps(
+                    {
+                        "readiness_score": 88,
+                        "urgency_tier": "medium",
+                        "summary": "Well-justified CSE -> ECE hardware acceleration benchmark with flexible scheduling options.",
+                        "strengths": [
+                            "Clear Vitis AI deployment plan and measurable latency target",
+                            "Flexible timing/hardware lowers contention risk",
+                        ],
+                        "prerequisites_check": "Confirm ESD Bench Certification before accessing Maxwell Block Lab 305.",
+                        "recommended_action": "Approve",
+                        "ai_mode": "seeded_brief",
+                    }
+                ),
+                "pending",
+                "",
+                "",
+                None,
+                now,
+                None,
+            ),
+            (
+                "Riya Chatterjee",
+                "ECE22B066",
+                "riya.c@campus.edu",
+                "ECE",
+                "Optical Microfluidic Water-Quality Sensor Calibration",
+                "capstone",
+                (today + timedelta(days=4)).isoformat(),
+                4,
+                uvvis_id,
+                tomorrow.isoformat(),
+                13,
+                15,
+                "Calibrating our custom LED-photodiode turbidity board against BioEngineering's reference UV-Vis spectrophotometer across 6 standard solutions.",
+                1,
+                "flexible_time",
+                0.0,
+                json.dumps(
+                    {
+                        "readiness_score": 93,
+                        "urgency_tier": "high",
+                        "summary": "High-priority ECE -> BIO interdisciplinary sensor calibration with zero prior usage this week.",
+                        "strengths": [
+                            "Zero prior lab hours this week (high fairness priority)",
+                            "Concise 2-hour reference benchmark with 4-student capstone impact",
+                        ],
+                        "prerequisites_check": "Require lab coat & Level-1 Wet Lab Biosafety sign-in at Curie Center 112.",
+                        "recommended_action": "Approve",
+                        "ai_mode": "seeded_brief",
+                    }
+                ),
+                "pending",
+                "",
+                "",
+                None,
+                now,
+                None,
+            ),
+        ]
+
+        conn.executemany(
+            """
+            INSERT INTO project_requests (
+                student_name, student_id, student_email, student_department,
+                project_title, project_track, project_deadline, team_size,
+                equipment_id, requested_date, start_hour, end_hour,
+                justification, safety_acknowledged, flexibility,
+                prior_hours_this_week, ai_brief_json, status,
+                reviewer_name, reviewer_notes, booking_id, created_at, reviewed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            requests_seed,
+        )
+
+        # Initial audit entry
+        conn.execute(
+            """
+            INSERT INTO audit_logs (actor, actor_role, action, entity_type, entity_id, details_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "Dr. Ananya Deshmukh",
+                "faculty",
+                "conflict_resolved",
+                "conflict",
+                4,
+                json.dumps(
+                    {
+                        "strategy": "cross_dept_reallocation",
+                        "summary": "Balanced A100 and RTX 6000 Ada load across BIO and CSE teams.",
+                    }
+                ),
+                now,
+            ),
+        )

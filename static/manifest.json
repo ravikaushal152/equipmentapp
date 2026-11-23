@@ -1,0 +1,9 @@
+{
+  "name": "LabLink — Campus Laboratory Resource-Sharing Platform",
+  "short_name": "LabLink",
+  "description": "GenAI-powered campus laboratory equipment discovery, intelligent slot booking, project access approvals, and fair scheduling conflict resolution.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f7fb",
+  "theme_color": "#1d4ed8"
+}

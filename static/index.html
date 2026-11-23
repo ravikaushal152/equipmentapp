@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta
+    name="description"
+    content="LabLink — GenAI-powered campus laboratory resource-sharing platform for cross-department equipment discovery, smart slot booking, faculty approvals, and fair conflict resolution."
+  />
+  <meta name="theme-color" content="#1d4ed8" />
+  <link rel="manifest" href="/static/manifest.json" />
+  <link rel="stylesheet" href="/static/css/styles.css" />
+  <title>LabLink — Making College Laboratories More Accessible</title>
+</head>
+<body>
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+
+  <header class="app-header" role="banner">
+    <div class="container header-inner">
+      <div class="brand-group">
+        <div class="brand-mark" aria-hidden="true">LL</div>
+        <div>
+          <h1 class="brand-title">LabLink</h1>
+          <p class="brand-subtitle">GenAI Campus Laboratory Resource-Sharing Platform</p>
+        </div>
+      </div>
+
+      <div class="header-controls">
+        <span id="ai-mode-badge" class="pill pill-info" aria-live="polite">
+          Checking AI engine…
+        </span>
+        <button
+          type="button"
+          id="quick-conflicts-btn"
+          class="pill pill-warning pill-btn"
+          aria-label="Jump to open scheduling conflicts"
+        >
+          <span id="header-conflict-count">0</span> Open Conflicts
+        </button>
+        <button
+          type="button"
+          id="quick-approvals-btn"
+          class="pill pill-accent pill-btn"
+          aria-label="Jump to pending faculty approvals"
+        >
+          <span id="header-approval-count">0</span> Pending Approvals
+        </button>
+        <button
+          type="button"
+          id="theme-toggle"
+          class="btn btn-ghost btn-sm"
+          aria-pressed="false"
+          aria-label="Toggle dark mode"
+        >
+          Dark Mode
+        </button>
+      </div>
+    </div>
+
+    <nav class="container nav-wrapper" aria-label="Primary LabLink workspaces">
+      <div class="tablist" role="tablist" aria-label="LabLink sections">
+        <button
+          type="button"
+          role="tab"
+          id="tab-btn-discover"
+          aria-controls="panel-discover"
+          aria-selected="true"
+          class="tab-btn is-active"
+          data-tab="discover"
+        >
+          1. Discover &amp; AI Finder
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="tab-btn-booking"
+          aria-controls="panel-booking"
+          aria-selected="false"
+          tabindex="-1"
+          class="tab-btn"
+          data-tab="booking"
+        >
+          2. Smart Slot Booking
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="tab-btn-requests"
+          aria-controls="panel-requests"
+          aria-selected="false"
+          tabindex="-1"
+          class="tab-btn"
+          data-tab="requests"
+        >
+          3. Project Requests
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="tab-btn-approvals"
+          aria-controls="panel-approvals"
+          aria-selected="false"
+          tabindex="-1"
+          class="tab-btn"
+          data-tab="approvals"
+        >
+          4. Faculty Approvals
+          <span id="tab-badge-approvals" class="tab-badge" aria-hidden="true">0</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="tab-btn-conflicts"
+          aria-controls="panel-conflicts"
+          aria-selected="false"
+          tabindex="-1"
+          class="tab-btn"
+          data-tab="conflicts"
+        >
+          5. Conflict Resolver
+          <span id="tab-badge-conflicts" class="tab-badge tab-badge-warn" aria-hidden="true">0</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="tab-btn-analytics"
+          aria-controls="panel-analytics"
+          aria-selected="false"
+          tabindex="-1"
+          class="tab-btn"
+          data-tab="analytics"
+        >
+          6. Utilization &amp; Insights
+        </button>
+      </div>
+    </nav>
+  </header>
+
+  <main id="main-content" class="container main-content" tabindex="-1">
+    <!-- Live accessible status banner -->
+    <div id="toast-region" class="toast-region" role="status" aria-live="polite" aria-atomic="true"></div>
+
+    <!-- PANEL 1: DISCOVER & AI FINDER -->
+    <section
+      id="panel-discover"
+      class="tab-panel"
+      role="tabpanel"
+      aria-labelledby="tab-btn-discover"
+    >
+      <div class="card hero-card">
+        <div class="section-header">
+          <div>
+            <h2>GenAI Cross-Department Equipment Finder</h2>
+            <p class="muted">
+              Describe what you are building and your deadline. LabLink matches specialized equipment,
+              development kits, and workstations across all five departments.
+            </p>
+          </div>
+        </div>
+
+        <form id="ai-discover-form" class="ai-form" novalidate>
+          <div class="form-group full-width">
+            <label for="ai-query">What do you need for your project or experiment?</label>
+            <textarea
+              id="ai-query"
+              name="query"
+              rows="2"
+              required
+              minlength="4"
+              maxlength="600"
+              placeholder="Example: Building an autonomous pothole-detection drone due Friday; need an edge GPU kit and lightweight 3D-printed chassis."
+            ></textarea>
+          </div>
+
+          <div class="form-row-4">
+            <div class="form-group">
+              <label for="ai-dept">Your Department</label>
+              <select id="ai-dept" name="student_department">
+                <option value="">Any Department</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="ai-duration">Session Length (hrs)</label>
+              <select id="ai-duration" name="duration_hours">
+                <option value="2" selected>2 hours</option>
+                <option value="3">3 hours</option>
+                <option value="4">4 hours</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="ai-deadline">Project Deadline</label>
+              <input type="date" id="ai-deadline" name="project_deadline" />
+            </div>
+            <div class="form-group form-action-align">
+              <button type="submit" id="ai-discover-submit" class="btn btn-primary full-btn">
+                Find Best Resources
+              </button>
+            </div>
+          </div>
+
+          <div class="sample-prompts" aria-label="Quick sample project queries">
+            <span class="sample-label">Try a sample:</span>
+            <button
+              type="button"
+              class="chip-btn"
+              data-sample-query="Need edge AI hardware and a carbon-fiber 3D printer for an autonomous drone obstacle avoidance capstone due in 3 days."
+              data-sample-dept="MECH"
+            >
+              Drone Vision &amp; Chassis
+            </button>
+            <button
+              type="button"
+              class="chip-btn"
+              data-sample-query="Training a large computer vision PyTorch model with 40GB+ GPU memory for medical imaging research."
+              data-sample-dept="BIO"
+            >
+              High-VRAM Deep Learning
+            </button>
+            <button
+              type="button"
+              class="chip-btn"
+              data-sample-query="Need a 4-channel oscilloscope to debug motor inverter PWM switching noise and SPI signals."
+              data-sample-dept="MECH"
+            >
+              Motor PWM &amp; Signal Debug
+            </button>
+          </div>
+        </form>
+
+        <div id="ai-discover-results" class="ai-results" aria-live="polite"></div>
+      </div>
+
+      <div class="card">
+        <div class="section-header">
+          <div>
+            <h2>Campus Laboratory Resource Catalog</h2>
+            <p class="muted">
+              Browse shared workstations, dev kits, and specialized instruments with live availability.
+            </p>
+          </div>
+          <span id="catalog-count" class="pill pill-neutral">Loading…</span>
+        </div>
+
+        <div class="filter-bar" role="search" aria-label="Filter equipment catalog">
+          <div class="form-group">
+            <label for="filter-search">Search equipment or specs</label>
+            <input
+              type="search"
+              id="filter-search"
+              placeholder="e.g., A100, FPGA, Jetson, Oscilloscope, 3D..."
+            />
+          </div>
+          <div class="form-group">
+            <label for="filter-dept">Department</label>
+            <select id="filter-dept">
+              <option value="">All Departments</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="filter-category">Resource Type</label>
+            <select id="filter-category">
+              <option value="">All Categories</option>
+              <option value="laboratory_workstation">Lab Workstations</option>
+              <option value="development_kit">Development Kits</option>
+              <option value="specialized_equipment">Specialised Equipment</option>
+            </select>
+          </div>
+          <div class="form-group checkbox-inline-group">
+            <label class="checkbox-label" for="filter-instant">
+              <input type="checkbox" id="filter-instant" />
+              <span>Instant booking only</span>
+            </label>
+          </div>
+        </div>
+
+        <div id="equipment-grid" class="equipment-grid" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <!-- PANEL 2: SMART SLOT BOOKING -->
+    <section
+      id="panel-booking"
+      class="tab-panel"
+      role="tabpanel"
+      aria-labelledby="tab-btn-booking"
+      hidden
+    >
+      <div class="two-col-layout">
+        <div class="card">
+          <div class="section-header">
+            <div>
+              <h2>Live Lab Schedule &amp; Smart Slot Optimizer</h2>
+              <p class="muted">
+                Inspect hourly availability and let LabLink pack gaps or balance load across departments.
+              </p>
+            </div>
+          </div>
+
+          <div class="form-row-3">
+            <div class="form-group">
+              <label for="schedule-equipment">Select Equipment</label>
+              <select id="schedule-equipment"></select>
+            </div>
+            <div class="form-group">
+              <label for="schedule-date">Date</label>
+              <input type="date" id="schedule-date" />
+            </div>
+            <div class="form-group">
+              <label for="schedule-duration">Desired Duration</label>
+              <select id="schedule-duration">
+                <option value="2" selected>2 hours</option>
+                <option value="3">3 hours</option>
+                <option value="4">4 hours</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="schedule-meta" class="schedule-meta"></div>
+
+          <h3 class="sub-heading">Hourly Timeline (Click any open hour to prefill)</h3>
+          <div class="legend" aria-label="Schedule color legend">
+            <span class="legend-item"><span class="dot dot-open" aria-hidden="true"></span>Open</span>
+            <span class="legend-item"><span class="dot dot-booked" aria-hidden="true"></span>Booked</span>
+            <span class="legend-item"><span class="dot dot-conflict" aria-hidden="true"></span>Conflict</span>
+          </div>
+          <div id="timeline-grid" class="timeline-grid" role="list" aria-label="Hourly slots"></div>
+
+          <div class="smart-slots-section">
+            <div class="section-header compact">
+              <h3 class="sub-heading">Recommended Optimal Slots</h3>
+              <button type="button" id="refresh-smart-slots-btn" class="btn btn-secondary btn-sm">
+                Re-optimize Slots
+              </button>
+            </div>
+            <div id="smart-slots-list" class="smart-slots-list" aria-live="polite"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="section-header">
+            <div>
+              <h2>Book Laboratory Slot</h2>
+              <p class="muted">
+                Open slots confirm immediately. Overlapping requests automatically trigger fair conflict resolution.
+              </p>
+            </div>
+          </div>
+
+          <form id="booking-form" class="stacked-form" novalidate>
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="book-student-name">Student Name</label>
+                <input type="text" id="book-student-name" required placeholder="e.g., Maya Deshmukh" />
+              </div>
+              <div class="form-group">
+                <label for="book-student-id">Student Roll / ID</label>
+                <input type="text" id="book-student-id" required placeholder="e.g., CSE23B042" />
+              </div>
+            </div>
+
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="book-student-dept">Your Department</label>
+                <select id="book-student-dept" required></select>
+              </div>
+              <div class="form-group">
+                <label for="book-track">Project Track</label>
+                <select id="book-track">
+                  <option value="capstone">Capstone Project</option>
+                  <option value="competition">Competition / Hackathon</option>
+                  <option value="research">Research Paper</option>
+                  <option value="course_lab">Course Lab</option>
+                  <option value="prototype">Independent Prototype</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="book-project-title">Project Title</label>
+              <input
+                type="text"
+                id="book-project-title"
+                required
+                placeholder="e.g., Real-Time Solar Fault Thermal Classifier"
+              />
+            </div>
+
+            <div class="form-row-3">
+              <div class="form-group">
+                <label for="book-start-hour">Start Hour</label>
+                <select id="book-start-hour"></select>
+              </div>
+              <div class="form-group">
+                <label for="book-end-hour">End Hour</label>
+                <select id="book-end-hour"></select>
+              </div>
+              <div class="form-group">
+                <label for="book-team-size">Team Size</label>
+                <input type="number" id="book-team-size" min="1" max="12" value="3" />
+              </div>
+            </div>
+
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="book-deadline">Project Deadline</label>
+                <input type="date" id="book-deadline" required />
+              </div>
+              <div class="form-group">
+                <label for="book-flexibility">Scheduling Flexibility</label>
+                <select id="book-flexibility">
+                  <option value="flexible_time">Flexible Time</option>
+                  <option value="flexible_equipment">Flexible Equipment</option>
+                  <option value="both">Flexible Time &amp; Equipment</option>
+                  <option value="strict">Strict (Exact Slot &amp; Hardware)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="book-prior-hours">Prior Lab Hours Used This Week (for fairness scoring)</label>
+              <input type="number" id="book-prior-hours" min="0" max="40" step="0.5" value="1" />
+            </div>
+
+            <div class="form-group">
+              <label for="book-notes">Notes (optional)</label>
+              <textarea
+                id="book-notes"
+                rows="2"
+                placeholder="Any hardware setup or cross-department coordination details..."
+              ></textarea>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" id="booking-submit-btn" class="btn btn-primary">
+                Confirm Slot Booking
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- PANEL 3: PROJECT-BASED ACCESS REQUESTS -->
+    <section
+      id="panel-requests"
+      class="tab-panel"
+      role="tabpanel"
+      aria-labelledby="tab-btn-requests"
+      hidden
+    >
+      <div class="two-col-layout">
+        <div class="card">
+          <div class="section-header">
+            <div>
+              <h2>Submit Project-Based Access Request</h2>
+              <p class="muted">
+                Request cross-department or faculty-gated equipment with an AI-generated readiness brief.
+              </p>
+            </div>
+          </div>
+
+          <form id="project-request-form" class="stacked-form" novalidate>
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="req-student-name">Student Name</label>
+                <input type="text" id="req-student-name" required placeholder="e.g., Devika Nair" />
+              </div>
+              <div class="form-group">
+                <label for="req-student-id">Student Roll / ID</label>
+                <input type="text" id="req-student-id" required placeholder="e.g., ECE22B091" />
+              </div>
+            </div>
+
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="req-email">Campus Email</label>
+                <input type="email" id="req-email" required placeholder="devika.nair@campus.edu" />
+              </div>
+              <div class="form-group">
+                <label for="req-student-dept">Your Department</label>
+                <select id="req-student-dept" required></select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="req-equipment">Target Laboratory Resource</label>
+              <select id="req-equipment" required></select>
+            </div>
+
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="req-project-title">Project Title</label>
+                <input
+                  type="text"
+                  id="req-project-title"
+                  required
+                  placeholder="e.g., Edge Speech-to-Braille Tactile Reader"
+                />
+              </div>
+              <div class="form-group">
+                <label for="req-track">Project Track</label>
+                <select id="req-track">
+                  <option value="capstone">Capstone Project</option>
+                  <option value="research">Research Paper</option>
+                  <option value="competition">Competition / Hackathon</option>
+                  <option value="course_lab">Course Lab</option>
+                  <option value="prototype">Independent Prototype</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row-3">
+              <div class="form-group">
+                <label for="req-date">Requested Date</label>
+                <input type="date" id="req-date" required />
+              </div>
+              <div class="form-group">
+                <label for="req-start-hour">Start Hour</label>
+                <select id="req-start-hour"></select>
+              </div>
+              <div class="form-group">
+                <label for="req-end-hour">End Hour</label>
+                <select id="req-end-hour"></select>
+              </div>
+            </div>
+
+            <div class="form-row-3">
+              <div class="form-group">
+                <label for="req-deadline">Project Deadline</label>
+                <input type="date" id="req-deadline" required />
+              </div>
+              <div class="form-group">
+                <label for="req-team-size">Team Size</label>
+                <input type="number" id="req-team-size" min="1" max="12" value="3" />
+              </div>
+              <div class="form-group">
+                <label for="req-flexibility">Flexibility</label>
+                <select id="req-flexibility">
+                  <option value="flexible_time">Flexible Time</option>
+                  <option value="both">Flexible Time &amp; Kit</option>
+                  <option value="flexible_equipment">Flexible Kit</option>
+                  <option value="strict">Strict</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="req-justification">Technical Justification &amp; Goals</label>
+              <textarea
+                id="req-justification"
+                rows="3"
+                required
+                minlength="12"
+                placeholder="Explain why this equipment is needed, what experiments you will run, and how your team is prepared."
+              ></textarea>
+            </div>
+
+            <div class="form-group">
+              <label class="checkbox-label" for="req-safety">
+                <input type="checkbox" id="req-safety" checked />
+                <span>I confirm our team meets or will complete the lab safety orientation before use.</span>
+              </label>
+            </div>
+
+            <div class="form-actions">
+              <button type="button" id="preview-brief-btn" class="btn btn-secondary">
+                Preview AI Readiness Brief
+              </button>
+              <button type="submit" id="req-submit-btn" class="btn btn-primary">
+                Submit for Faculty Approval
+              </button>
+            </div>
+          </form>
+
+          <div id="ai-brief-preview" class="ai-results" aria-live="polite"></div>
+        </div>
+
+        <div class="card">
+          <div class="section-header">
+            <div>
+              <h2>Submitted Project Access Requests</h2>
+              <p class="muted">Track approval status and faculty coordinator feedback in real time.</p>
+            </div>
+          </div>
+          <div id="student-requests-list" class="stack-list" aria-live="polite"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PANEL 4: FACULTY APPROVALS -->
+    <section
+      id="panel-approvals"
+      class="tab-panel"
+      role="tabpanel"
+      aria-labelledby="tab-btn-approvals"
+      hidden
+    >
+      <div class="card">
+        <div class="section-header">
+          <div>
+            <h2>Faculty &amp; Lab Coordinator Approval Queue</h2>
+            <p class="muted">
+              Review cross-department project briefs, verify safety readiness, and approve or request changes.
+              Approved requests with slot collisions automatically route to the Conflict Resolver.
+            </p>
+          </div>
+          <div class="inline-controls">
+            <label for="approval-status-filter" class="sr-only">Filter approval requests by status</label>
+            <select id="approval-status-filter">
+              <option value="pending" selected>Pending Review</option>
+              <option value="all">All Requests</option>
+              <option value="approved">Approved</option>
+              <option value="revision_requested">Revision Requested</option>
+              <option value="rejected">Rejected</option>
+            </select>
+            <label for="faculty-reviewer-name" class="sr-only">Acting Faculty Coordinator Name</label>
+            <input
+              type="text"
+              id="faculty-reviewer-name"
+              value="Dr. Ananya Deshmukh"
+              aria-label="Faculty reviewer name"
+              placeholder="Reviewer name"
+            />
+          </div>
+        </div>
+
+        <div id="faculty-approvals-list" class="stack-list" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <!-- PANEL 5: SCHEDULING CONFLICT RESOLVER -->
+    <section
+      id="panel-conflicts"
+      class="tab-panel"
+      role="tabpanel"
+      aria-labelledby="tab-btn-conflicts"
+      hidden
+    >
+      <div class="card">
+        <div class="section-header">
+          <div>
+            <h2>Intelligent Scheduling Conflict Resolver</h2>
+            <p class="muted">
+              Combines deterministic fairness scoring (deadline urgency, anti-starvation usage history,
+              hardware specificity, team impact) with Gemini allocation explanations to resolve double-bookings fairly.
+            </p>
+          </div>
+          <div class="inline-controls">
+            <label for="conflict-status-filter" class="sr-only">Filter conflicts by status</label>
+            <select id="conflict-status-filter">
+              <option value="open" selected>Open Conflicts</option>
+              <option value="all">All Conflicts</option>
+              <option value="resolved">Resolved History</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="conflict-layout">
+          <div class="conflict-sidebar">
+            <h3 class="sub-heading">Detected Conflicts</h3>
+            <div id="conflicts-list" class="stack-list" aria-live="polite"></div>
+          </div>
+
+          <div class="conflict-workspace">
+            <div id="conflict-detail" aria-live="polite">
+              <p class="muted">Select a scheduling conflict to inspect fairness scores and feasible resolutions.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- PANEL 6: UTILIZATION & INSIGHTS -->
+    <section
+      id="panel-analytics"
+      class="tab-panel"
+      role="tabpanel"
+      aria-labelledby="tab-btn-analytics"
+      hidden
+    >
+      <div id="kpi-grid" class="kpi-grid" aria-live="polite"></div>
+
+      <div class="two-col-layout">
+        <div class="card">
+          <div class="section-header">
+            <div>
+              <h2>Department Lab Utilization &amp; Cross-Dept Sharing</h2>
+              <p class="muted">48-hour capacity usage and inbound cross-department sessions.</p>
+            </div>
+          </div>
+          <div id="dept-util-chart" class="bar-chart"></div>
+        </div>
+
+        <div class="card">
+          <div class="section-header">
+            <div>
+              <h2>Peak Campus Lab Demand by Hour</h2>
+              <p class="muted">Identifies congestion windows so students can pick faster off-peak slots.</p>
+            </div>
+          </div>
+          <div id="peak-hours-chart" class="peak-chart"></div>
+        </div>
+      </div>
+
+      <div class="two-col-layout">
+        <div class="card">
+          <div class="section-header">
+            <div>
+              <h2>Underutilized Equipment Ready to Book</h2>
+              <p class="muted">High-availability campus kits under 25% booked across the next 48 hours.</p>
+            </div>
+          </div>
+          <div id="underutilized-list" class="stack-list"></div>
+        </div>
+
+        <div class="card">
+          <div class="section-header">
+            <div>
+              <h2>Governance &amp; Allocation Audit Trail</h2>
+              <p class="muted">Transparent log of bookings, faculty approvals, and conflict resolutions.</p>
+            </div>
+          </div>
+          <div id="audit-log-list" class="stack-list"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer" role="contentinfo">
+    <div class="container footer-inner">
+      <p>
+        <strong>LabLink</strong> — Making College Laboratories More Accessible across CSE, ECE, Robotics, Mechanical &amp; BioEngineering.
+      </p>
+      <p class="muted">
+        Hybrid Deterministic Fairness Engine + Google Gemini API · Keyboard &amp; Screen-Reader Accessible
+      </p>
+    </div>
+  </footer>
+
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>
